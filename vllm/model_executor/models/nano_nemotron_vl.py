@@ -14,6 +14,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Annotated, Any, Literal, Optional, TypedDict, TypeVar, Union
 
 import numpy.typing as npt
+import regex as re
 import torch
 import torch.nn as nn
 import torchvision.transforms as T
@@ -347,11 +348,22 @@ class BaseNanoNemotronVLProcessor(ABC):
                 ),
             }
 
-            for pixel_values in pixel_values_lst:
+            assert len(text) == 1, (
+                "hf_processor is called on the output of get_dummy_text, "
+                "which should be a single string"
+            )
+            parts = [x for x in re.split(r"(<image>)", text[0]) if x]
+            assert parts.count("<image>") == len(pixel_values_lst), (
+                "the number of <image> tokens in the text should be the "
+                "same as the number of images"
+            )
+
+            for i, pixel_values in enumerate(pixel_values_lst):
                 num_patches = pixel_values.shape[0]
                 feature_size = num_patches * self.num_image_token
                 image_repl = self.get_image_repl(feature_size, num_patches)
-                text = [t.replace("<image>", image_repl.full, 1) for t in text]
+                parts[i] = parts[i].replace("<image>", image_repl.full)
+            text = ["".join(parts)]
         return text, image_inputs
 
     def _make_batch_input(self, input_item: Optional[Union[Any, list[Any]]] = None):
