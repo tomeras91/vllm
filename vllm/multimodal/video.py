@@ -178,8 +178,12 @@ class OpenCVDynamicVideoBackend(OpenCVVideoBackend):
         """
         Args:
             num_frames (int): Maximum number of frames to load.
+            A total sampled number of frames will never be larger
+            than this value. Set it -1 to remove the upper limit.
+
             fps (int): Desired video sampling rate. A real samping
-            rate may be lower if we encounter long video
+            rate may be lower if we encounter long video and
+            num_frames upper limit is set to positive value.
         """
         import cv2
 
@@ -218,9 +222,12 @@ class OpenCVDynamicVideoBackend(OpenCVVideoBackend):
         raw = np.linspace(0, total_frames_num - 1, max_samples, endpoint=True)
         frame_indices = np.unique(raw.round().astype(int)).tolist()
 
+        effective_fps = len(frame_indices) / duration
         print(
-            f"Video {duration:.2f}src at {fps:.2f}fps sampled "
-            f"into frame indexes {frame_indices}."
+            f"Video [{total_frames_num} fames]({duration:.2f}sec "
+            f"at {original_fps:.2f}fps) sampled "
+            f"into frame [{len(frame_indices)}] indexes {frame_indices} "
+            f"at {effective_fps:.2f}fps."
         )
 
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
