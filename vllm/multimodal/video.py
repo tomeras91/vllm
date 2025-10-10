@@ -205,17 +205,13 @@ class OpenCVDynamicVideoBackend(OpenCVVideoBackend):
             original_fps = 30
 
         duration = total_frames_num / original_fps
+        max_samples = int(math.floor(duration * fps))
+        max_samples = max(1, min(max_samples, total_frames_num))
 
         # Determine target number of samples
         if num_frames > 0:
             # Hard upper bound
-            max_samples = int(num_frames)
-        else:
-            # No cap -> sample at desired fps
-            max_samples = int(max(1, math.floor(duration * fps)))
-
-        # Clamp to available frames if count is known
-        max_samples = max(1, min(max_samples, total_frames_num))
+            max_samples = min(max_samples, num_frames)
 
         # Uniform coverage of the entire timeline within the cap
         # Use linspace over [0, total_frames-1]
