@@ -259,18 +259,22 @@ def input_conditioner(x, norm_mean, norm_std):
 
 
 def calculate_timestamps(
-    indices: list[int] | torch.Tensor, video_fps: float, merge_size: int
+    indices: list[int] | torch.Tensor,
+    video_fps: float,  # merge_size: int
 ):
     if not isinstance(indices, list):
         indices = indices.tolist()
-    if len(indices) % merge_size != 0:
-        # don't update metadata's frames_indices directly
-        indices = indices + [indices[-1]] * (merge_size - len(indices) % merge_size)
-    timestamps = [idx / video_fps for idx in indices]
-    timestamps = [
-        (timestamps[i] + timestamps[i + merge_size - 1]) / 2
-        for i in range(0, len(timestamps), merge_size)
-    ]
+
+    timestamps = [i / video_fps for i in indices]
+    # ekhvedchenia: Commented because could not understand what it does
+    # if len(indices) % merge_size != 0:
+    #     # don't update metadata's frames_indices directly
+    #     indices = indices + [indices[-1]] * (merge_size - len(indices) % merge_size)
+    # timestamps = [idx / video_fps for idx in indices]
+    # timestamps = [
+    #     (timestamps[i] + timestamps[i + merge_size - 1]) / 2
+    #     for i in range(0, len(timestamps), merge_size)
+    # ]
     return timestamps
 
 
@@ -640,7 +644,7 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
                          sample fps for opencv backend
             video_context_token (str): the token to use for the video context
         """
-        timestamps = calculate_timestamps(frames_indices, video_fps, merge_size=1)
+        timestamps = calculate_timestamps(frames_indices, video_fps)
         assert len(timestamps) == len(tokens_per_frame), (
             "timestamps and tokens_per_frame must have the same length"
         )
@@ -1427,7 +1431,9 @@ class NemotronH_Nano_VL_V2(
 
             pixel_values_flat_video = flatten_bn(pixel_values_flat_video, concat=True)
             video_num_patches = flatten_bn(video_num_patches, concat=True)
-            frames_indices = flatten_bn(frames_indices, concat=True)
+            print(frames_indices)
+            frames_indices = frames_indices.flatten()
+            # frames_indices = flatten_bn(frames_indices, concat=True)
             fps = fps.flatten()
             expected_h = expected_w = self.config.force_image_size
             num_frames = video_num_patches[0].item()
