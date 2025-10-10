@@ -22,7 +22,7 @@ from PIL import Image
 from transformers import BatchFeature, PretrainedConfig, TensorType
 
 from vllm.config import VllmConfig
-from vllm.config.multimodal import BaseDummyOptions
+from vllm.config.multimodal import BaseDummyOptions, VideoDummyOptions
 from vllm.model_executor.layers.activation import ReLUSquaredActivation
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
@@ -55,12 +55,14 @@ from vllm.multimodal.inputs import (
     MultiModalFieldConfig,
     MultiModalKwargs,
     MultiModalKwargsItems,
+    VideoItem,
 )
 from vllm.multimodal.parse import (
     ImageEmbeddingItems,
     ImageProcessorItems,
     ImageSize,
     MultiModalDataItems,
+    MultiModalDataParser,
 )
 from vllm.multimodal.processing import (
     BaseMultiModalProcessor,
@@ -129,7 +131,8 @@ class NanoNemotronVLVideoPixelInputs(TensorSchema):
     """
     Dimensions:
         - bvf: Batch size * number of videos * num_frames
-        - bn: Batch size * number of images
+        - bn: Batch size * number of videos
+        - f: Number of frames
         - c: Number of channels (3)
         - h: Height of each video frame
         - w: Width of each video frame
@@ -138,6 +141,8 @@ class NanoNemotronVLVideoPixelInputs(TensorSchema):
     type: Literal["pixel_values_videos"]
     pixel_values_flat: Annotated[torch.Tensor, TensorShape("bvf", 3, "h", "w")]
     num_patches: Annotated[torch.Tensor, TensorShape("bn")]
+    frames_indices: Annotated[torch.Tensor, TensorShape("bn", "f")]
+    fps: Annotated[torch.Tensor, TensorShape(1)]
 
 
 class NanoNemotronVLVideoEmbeddingInputs(TensorSchema):
@@ -251,6 +256,22 @@ def video_to_pixel_values(
 
 def input_conditioner(x, norm_mean, norm_std):
     return (x - norm_mean) / norm_std
+
+
+def calculate_timestamps(
+    indices: list[int] | torch.Tensor, video_fps: float, merge_size: int
+):
+    if not isinstance(indices, list):
+        indices = indices.tolist()
+    if len(indices) % merge_size != 0:
+        # don't update metadata's frames_indices directly
+        indices = indices + [indices[-1]] * (merge_size - len(indices) % merge_size)
+    timestamps = [idx / video_fps for idx in indices]
+    timestamps = [
+        (timestamps[i] + timestamps[i + merge_size - 1]) / 2
+        for i in range(0, len(timestamps), merge_size)
+    ]
+    return timestamps
 
 
 class BaseNanoNemotronVLProcessor(ABC):
@@ -469,15 +490,17 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
     def _preprocess_video(
         self,
         text: list[str],
-        videos: list[npt.NDArray],
+        videos: list[tuple[npt.NDArray, dict[str, Any]]],
         max_num_tiles: int,
         dynamic_image_size: Optional[bool] = None,
     ):
         if len(videos) == 0 or not self.supports_video:
             video_inputs = {}
         else:
+            videos_lst = [v[0] for v in videos]
+            video_metadata_lst = [v[1] for v in videos]
             pixel_values_lst_video = self._videos_to_pixel_values_lst(
-                videos,
+                videos_lst,
                 max_num_tiles=max_num_tiles,
                 dynamic_image_size=dynamic_image_size,
             )
@@ -489,6 +512,12 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
                 "video_num_patches": torch.tensor(
                     [len(item) for item in pixel_values_lst_video]
                 ),
+                "frames_indices": torch.tensor(
+                    [metadata["frames_indices"] for metadata in video_metadata_lst]
+                ),
+                "fps": torch.tensor(
+                    [metadata["fps"] for metadata in video_metadata_lst]
+                ),
             }
 
             image_size: int = self.config.force_image_size
@@ -498,7 +527,9 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
                 (image_size * image_size // patch_size**2) * (downsample_ratio**2)
             )
 
-            for pixel_values in pixel_values_lst_video:
+            for pixel_values, video_metadata in zip(
+                pixel_values_lst_video, video_metadata_lst
+            ):
                 num_frames = pixel_values.shape[0]
 
                 if (
@@ -521,7 +552,12 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
                 else:
                     tokens_per_frame = [tokens_in_single_frame] * num_frames
 
-                video_repl = self.get_video_repl(tokens_per_frame, self.video_token)
+                video_repl = self.get_video_repl(
+                    tokens_per_frame,
+                    video_metadata["frames_indices"],
+                    video_metadata["fps"],
+                    self.video_token,
+                )
 
                 text = [t.replace("<video>", video_repl.full, 1) for t in text]
         return text, video_inputs
@@ -530,7 +566,7 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
         self,
         text: Optional[Union[str, list[str]]] = None,
         images: Optional[Union[Image.Image, list[Image.Image]]] = None,
-        videos: Optional[Union[npt.NDArray, list[npt.NDArray]]] = None,
+        videos: Optional[list[tuple[npt.NDArray, dict[str, Any]]]] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         max_num_tiles: Optional[int] = None,
         dynamic_image_size: Optional[bool] = None,
@@ -576,6 +612,8 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
     def get_video_repl(
         cls,
         tokens_per_frame: list[int],
+        frames_indices: list[int],
+        video_fps: float,
         video_context_token: str = IMG_CONTEXT,
     ) -> PromptUpdateDetails[str]:
         """
@@ -597,7 +635,13 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
         Args:
             tokens_per_frame (list[int]): number of tokens per frame
             video_context_token (str): the token to use for the video context
+            frames_indices (list[int]): frame indices
+            fps (float): video fps for opencv_dynamic backend,
+                         sample fps for opencv backend
+            video_context_token (str): the token to use for the video context
         """
+        timestamps = calculate_timestamps(frames_indices, video_fps, merge_size=1)
+        print(f"#################### {timestamps=} ######################", flush=True)
         repl_full = "".join(
             [
                 f"Frame{i + 1}: {IMG_START}{video_context_token * num_tokens}{IMG_END}"
@@ -834,6 +878,9 @@ class NanoNemotronVLMultiModalProcessor(
 ):
     """MultiModalProcessor extended for video support"""
 
+    def _get_data_parser(self) -> MultiModalDataParser:
+        return MultiModalDataParser(video_needs_metadata=True)
+
     def _call_hf_processor(
         self,
         prompt: str,
@@ -868,6 +915,8 @@ class NanoNemotronVLMultiModalProcessor(
                 ),
                 video_num_patches=MultiModalFieldConfig.batched("video"),
                 video_token_id=MultiModalFieldConfig.shared("video", num_videos),
+                frames_indices=MultiModalFieldConfig.batched("video"),
+                fps=MultiModalFieldConfig.batched("video"),
             )
         else:
             video_fields = {}
@@ -898,6 +947,7 @@ class NanoNemotronVLMultiModalProcessor(
 
         def get_video_replacement_internvl(item_idx: int):
             feature_size = hf_processor.num_image_token
+            video, metadata = mm_items["video"][item_idx]
             num_patches = video_num_patches[item_idx]
             if num_patches is not None:
                 assert isinstance(num_patches, int)
@@ -921,6 +971,8 @@ class NanoNemotronVLMultiModalProcessor(
 
             return hf_processor.get_video_repl(
                 tokens_per_frame,
+                frames_indices=metadata["frames_indices"],
+                video_fps=metadata["fps"],
                 video_context_token=hf_processor.video_token,
             )
 
@@ -979,6 +1031,37 @@ class NanoNemotronVLDummyInputsBuilder(
         num_videos = mm_counts.get("video", 0)
 
         return super().get_dummy_text(mm_counts) + "<video>" * num_videos
+
+    def _get_dummy_videos(
+        self,
+        *,
+        width: int,
+        height: int,
+        num_frames: int,
+        num_videos: int,
+        overrides: Optional[VideoDummyOptions] = None,
+    ) -> list[VideoItem]:
+        video = super()._get_dummy_videos(
+            width=width,
+            height=height,
+            num_frames=num_frames,
+            num_videos=1,
+            overrides=overrides,
+        )[0]
+        video_items = []
+        for _ in range(num_videos):
+            video_metadata = {
+                "total_num_frames": num_frames,
+                "fps": 2.0,
+                "duration": num_frames / 2.0,
+                "video_backend": "opencv_dynamic",
+                "frames_indices": [i for i in range(num_frames)],
+                "do_sample_frames": False,
+            }
+            video_item = (video.copy(), video_metadata)
+            video_items.append(video_item)
+
+        return video_items
 
     def get_dummy_mm_data(
         self,
@@ -1211,6 +1294,8 @@ class NemotronH_Nano_VL_V2(
         # TODO: Maybe this can be optimized to avoid the loop?
         for i, single_video_embeddings in enumerate(video_embeddings):
             num_frames = video_input["num_patches"][i].item()
+            frames_indices = video_input["frames_indices"][i].tolist()
+            fps = video_input["fps"].item()
             assert single_video_embeddings.shape[0] % num_frames == 0
 
             if video_pruning_rate is not None and video_pruning_rate > 0.0:
@@ -1239,6 +1324,8 @@ class NemotronH_Nano_VL_V2(
                 self._create_final_video_embeddings(
                     single_video_embeddings,
                     num_tokens_per_frame,
+                    frames_indices,
+                    fps,
                 ),
             )
 
@@ -1248,6 +1335,8 @@ class NemotronH_Nano_VL_V2(
         self,
         video_embeddings: torch.Tensor,
         num_tokens_per_frame: list[int],
+        frames_indices: torch.Tensor,
+        fps: float,
     ) -> torch.Tensor:
         """Create final embeddings that combine video embeddings with
         text embeddings of indicator tokens.
@@ -1265,7 +1354,9 @@ class NemotronH_Nano_VL_V2(
         # Generate video replacement text and convert to token IDs
         video_repl_text = NanoNemotronVLProcessor.get_video_repl(
             num_tokens_per_frame,
-            IMG_CONTEXT,
+            frames_indices=frames_indices,
+            video_fps=fps,
+            video_context_token=IMG_CONTEXT,
         ).full
 
         tokenizer = cached_tokenizer_from_config(self.model_config)
@@ -1298,6 +1389,8 @@ class NemotronH_Nano_VL_V2(
         pixel_values_flat_video = kwargs.pop("pixel_values_flat_video", None)
         video_num_patches = kwargs.pop("video_num_patches", None)
         video_embeds = kwargs.pop("video_embeds", None)
+        frames_indices = kwargs.pop("frames_indices", None)
+        fps = kwargs.pop("fps", None)
 
         if pixel_values_flat_video is None and video_embeds is None:
             return None
@@ -1327,13 +1420,18 @@ class NemotronH_Nano_VL_V2(
 
             pixel_values_flat_video = flatten_bn(pixel_values_flat_video, concat=True)
             video_num_patches = flatten_bn(video_num_patches, concat=True)
+            frames_indices = flatten_bn(frames_indices, concat=True)
+            fps = fps.flatten()
             expected_h = expected_w = self.config.force_image_size
-            resolve_bindings = {"h": expected_h, "w": expected_w}
+            num_frames = video_num_patches[0].item()
+            resolve_bindings = {"h": expected_h, "w": expected_w, "f": num_frames}
 
             return NanoNemotronVLVideoPixelInputs(
                 type="pixel_values_videos",
                 pixel_values_flat=pixel_values_flat_video,
                 num_patches=video_num_patches,
+                frames_indices=frames_indices,
+                fps=fps,
                 resolve_bindings=resolve_bindings,
             )
 
