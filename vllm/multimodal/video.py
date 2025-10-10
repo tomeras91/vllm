@@ -220,7 +220,7 @@ class OpenCVDynamicVideoBackend(OpenCVVideoBackend):
 
         print(
             f"Video {duration:.2f}src at {fps:.2f}fps sampled "
-            f"into {frame_indices} frames."
+            f"into frame indexes {frame_indices}."
         )
 
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
