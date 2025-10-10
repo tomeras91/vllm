@@ -641,10 +641,17 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
             video_context_token (str): the token to use for the video context
         """
         timestamps = calculate_timestamps(frames_indices, video_fps, merge_size=1)
-        print(f"#################### {timestamps=} ######################", flush=True)
+        assert len(timestamps) == len(tokens_per_frame), (
+            "timestamps and tokens_per_frame must have the same length"
+        )
+        frame_separators = [
+            f"Frame {i + 1} sampled at {timestamp:.2f} seconds: "
+            for i, timestamp in enumerate(timestamps)
+        ]
         repl_full = "".join(
             [
-                f"Frame{i + 1}: {IMG_START}{video_context_token * num_tokens}{IMG_END}"
+                f"{frame_separators[i]}"
+                f"{IMG_START}{video_context_token * num_tokens}{IMG_END}"
                 for i, num_tokens in enumerate(tokens_per_frame)
             ]
         )
