@@ -194,7 +194,7 @@ class OpenCVDynamicVideoBackend(OpenCVVideoBackend):
         # https://github.com/huggingface/transformers/blob/v4.55.4/src/transformers/models/glm4v/video_processing_glm4v.py#L103-L140
         frame_indices: Union[range, list[int]]
         if duration <= max_duration:
-            n = int(math.floor(duration * fps))
+            n = min(int(math.floor(duration * fps)), num_frames)
             frame_indices = sorted(
                 {
                     min(max_frame_idx, int(math.ceil(i * original_fps / fps)))
