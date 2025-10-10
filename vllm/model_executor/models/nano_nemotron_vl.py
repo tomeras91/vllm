@@ -142,7 +142,7 @@ class NanoNemotronVLVideoPixelInputs(TensorSchema):
     pixel_values_flat: Annotated[torch.Tensor, TensorShape("bvf", 3, "h", "w")]
     num_patches: Annotated[torch.Tensor, TensorShape("bn")]
     frames_indices: Annotated[torch.Tensor, TensorShape("bn", "f")]
-    fps: Annotated[torch.Tensor, TensorShape(1)]
+    fps: Annotated[torch.Tensor, TensorShape("bn")]
 
 
 class NanoNemotronVLVideoEmbeddingInputs(TensorSchema):
@@ -1302,7 +1302,7 @@ class NemotronH_Nano_VL_V2(
         for i, single_video_embeddings in enumerate(video_embeddings):
             num_frames = video_input["num_patches"][i].item()
             frames_indices = video_input["frames_indices"][i].tolist()
-            fps = video_input["fps"].item()
+            fps = video_input["fps"][i].item()
             assert single_video_embeddings.shape[0] % num_frames == 0
 
             if video_pruning_rate is not None and video_pruning_rate > 0.0:
