@@ -13,9 +13,12 @@ import numpy.typing as npt
 from PIL import Image
 
 from vllm import envs
+from vllm.logger import init_logger
 
 from .base import MediaIO
 from .image import ImageMediaIO
+
+logger = init_logger(__name__)
 
 
 def resize_video(frames: npt.NDArray, size: tuple[int, int]) -> npt.NDArray:
@@ -190,17 +193,22 @@ class OpenCVDynamicVideoBackend(OpenCVVideoBackend):
         backend = cls().get_cv2_video_api()
         cap = cv2.VideoCapture(BytesIO(data), backend, [])
         if not cap.isOpened():
+            logger.error("Could not open video stream")
             raise ValueError("Could not open video stream")
 
         total_frames_num = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         if total_frames_num == 0:
-            raise ValueError("CAP_PROP_FRAME_COUNT returned 0")
+            logger.error(
+                "cap.get(cv2.CAP_PROP_FRAME_COUNT) returned %d frames", total_frames_num
+            )
+            raise ValueError(f"CAP_PROP_FRAME_COUNT returned {total_frames_num}")
 
         original_fps = cap.get(cv2.CAP_PROP_FPS)
         if not (original_fps > 0):
-            print(
-                f"WARNING: CAP_PROP_FPS returned {original_fps}. "
-                f"We will use 30 FPS as default fallback."
+            logger.warning(
+                "WARNING: CAP_PROP_FPS returned %f. "
+                "We will use 30 FPS as default fallback.",
+                original_fps,
             )
             original_fps = 30
 
@@ -219,11 +227,14 @@ class OpenCVDynamicVideoBackend(OpenCVVideoBackend):
         frame_indices = np.unique(raw.round().astype(int)).tolist()
 
         effective_fps = len(frame_indices) / duration
-        print(
-            f"Video [{total_frames_num} fames]({duration:.2f}sec "
-            f"at {original_fps:.2f}fps) sampled "
-            f"into frame [{len(frame_indices)}] indexes {frame_indices} "
-            f"at {effective_fps:.2f}fps."
+        logger.info(
+            "Video [%d frames] (%.2f sec at %.2f fps) sampled "
+            "into [%d] frame indexes at %.2f effective fps.",
+            total_frames_num,
+            duration,
+            original_fps,
+            len(frame_indices),
+            effective_fps,
         )
 
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -234,6 +245,7 @@ class OpenCVDynamicVideoBackend(OpenCVVideoBackend):
         for idx in range(total_frames_num):
             ok = cap.grab()
             if not ok:
+                logger.warning("Failure while reading frame %d", idx)
                 break
             if idx in frame_indices:
                 ret, frame = cap.retrieve()
