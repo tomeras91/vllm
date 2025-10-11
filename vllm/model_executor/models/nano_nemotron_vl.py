@@ -8,6 +8,7 @@
 # --------------------------------------------------------
 
 import copy
+import os
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
@@ -635,14 +636,24 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
                          sample fps for opencv backend
             video_context_token (str): the token to use for the video context
         """
-        timestamps = calculate_timestamps(frames_indices, video_fps)
-        assert len(timestamps) == len(tokens_per_frame), (
-            "timestamps and tokens_per_frame must have the same length"
+        timestamps_enabled = bool(
+            os.environ.get("VLLM_NANO_NEMOTRON_ENABLE_TIMESTAMPS", False)
         )
-        frame_separators = [
-            f"Frame {i + 1} sampled at {timestamp:.2f} seconds: "
-            for i, timestamp in enumerate(timestamps)
-        ]
+
+        if timestamps_enabled:
+            timestamps = calculate_timestamps(frames_indices, video_fps)
+            assert len(timestamps) == len(tokens_per_frame), (
+                "timestamps and tokens_per_frame must have the same length"
+            )
+            frame_separators = [
+                f"Frame {i + 1} sampled at {timestamp:.2f} seconds: "
+                for i, timestamp in enumerate(timestamps)
+            ]
+        else:
+            frame_separators = [
+                f"Frame {i + 1}: " for i, _ in enumerate(tokens_per_frame)
+            ]
+
         repl_full = "".join(
             [
                 f"{frame_separators[i]}"
