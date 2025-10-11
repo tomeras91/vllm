@@ -428,7 +428,13 @@ def _merge_multimodal_embeddings(
 
     mm_embeds_flat = _flatten_embeddings(multimodal_embeddings)
     input_dtype = inputs_embeds.dtype
-
+    logger.info(
+        f"_merge_multimodal_embeddings\n"
+        f"{inputs_embeds.shape=}\n"
+        f"{mm_embeds_flat.shape=}\n"
+        f"{is_multimodal.shape=}\n"
+        f"{is_multimodal.sum().item()=}\n",
+    )
     try:
         # For debugging
         # inputs_embeds[is_multimodal] = mm_embeds_flat.to(dtype=input_dtype)
