@@ -265,16 +265,7 @@ def calculate_timestamps(
     if not isinstance(indices, list):
         indices = indices.tolist()
 
-    timestamps = [i / video_fps for i in indices]
-    # ekhvedchenia: Commented because could not understand what it does
-    # if len(indices) % merge_size != 0:
-    #     # don't update metadata's frames_indices directly
-    #     indices = indices + [indices[-1]] * (merge_size - len(indices) % merge_size)
-    # timestamps = [idx / video_fps for idx in indices]
-    # timestamps = [
-    #     (timestamps[i] + timestamps[i + merge_size - 1]) / 2
-    #     for i in range(0, len(timestamps), merge_size)
-    # ]
+    timestamps = [int(i) / float(video_fps) for i in indices]
     return timestamps
 
 
@@ -557,10 +548,10 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
                     tokens_per_frame = [tokens_in_single_frame] * num_frames
 
                 video_repl = self.get_video_repl(
-                    tokens_per_frame,
-                    video_metadata["frames_indices"],
-                    video_metadata["fps"],
-                    self.video_token,
+                    tokens_per_frame=tokens_per_frame,
+                    frames_indices=video_metadata["frames_indices"],
+                    video_fps=video_metadata["fps"],
+                    video_context_token=self.video_token,
                 )
 
                 text = [t.replace("<video>", video_repl.full, 1) for t in text]
