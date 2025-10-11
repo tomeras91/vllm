@@ -264,7 +264,7 @@ class OpenCVDynamicVideoBackend(OpenCVVideoBackend):
             "fps": original_fps,
             "duration": duration,
             "video_backend": "opencv_dynamic",
-            "frames_indices": list(frame_indices),
+            "frames_indices": frame_indices,
             "do_sample_frames": False,
         }
 

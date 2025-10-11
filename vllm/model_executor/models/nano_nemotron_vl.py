@@ -141,7 +141,7 @@ class NanoNemotronVLVideoPixelInputs(TensorSchema):
     type: Literal["pixel_values_videos"]
     pixel_values_flat: Annotated[torch.Tensor, TensorShape("bvf", 3, "h", "w")]
     num_patches: Annotated[torch.Tensor, TensorShape("bn")]
-    frames_indices: Annotated[torch.Tensor, TensorShape("bn", "f")]
+    frames_indices: Annotated[torch.Tensor, TensorShape("bvf")]
     fps: Annotated[torch.Tensor, TensorShape("bn")]
 
 
@@ -516,9 +516,9 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
                 "video_num_patches": torch.tensor(
                     [len(item) for item in pixel_values_lst_video]
                 ),
-                "frames_indices": torch.tensor(
-                    [metadata["frames_indices"] for metadata in video_metadata_lst]
-                ),
+                "frames_indices": [
+                    metadata["frames_indices"] for metadata in video_metadata_lst
+                ],
                 "fps": torch.tensor(
                     [metadata["fps"] for metadata in video_metadata_lst]
                 ),
@@ -1299,13 +1299,14 @@ class NemotronH_Nano_VL_V2(
         rows = int(image_rows * downsample_ratio // patch_size)
         cols = int(image_cols * downsample_ratio // patch_size)
         video_pruning_rate = self.video_pruning_rate
-
+        video_num_frames = video_input["num_patches"].tolist()
+        video_frames_indices = video_input["frames_indices"].split(video_num_frames)
         # Calculate video feature dimensions (number of frames and
         # their feature size (AKA tokens per frame))
         # TODO: Maybe this can be optimized to avoid the loop?
         for i, single_video_embeddings in enumerate(video_embeddings):
-            num_frames = video_input["num_patches"][i].item()
-            frames_indices = video_input["frames_indices"][i].tolist()
+            num_frames = video_num_frames[i]
+            frames_indices = video_frames_indices[i].tolist()
             fps = video_input["fps"][i].item()
             assert single_video_embeddings.shape[0] % num_frames == 0
 
@@ -1431,9 +1432,12 @@ class NemotronH_Nano_VL_V2(
 
             pixel_values_flat_video = flatten_bn(pixel_values_flat_video, concat=True)
             video_num_patches = flatten_bn(video_num_patches, concat=True)
-            print(frames_indices)
-            frames_indices = frames_indices.flatten()
-            # frames_indices = flatten_bn(frames_indices, concat=True)
+
+            if torch.is_tensor(frames_indices):
+                frames_indices = frames_indices.flatten()
+            else:
+                frames_indices = torch.cat([f.flatten() for f in frames_indices], dim=0)
+
             fps = fps.flatten()
             expected_h = expected_w = self.config.force_image_size
             num_frames = video_num_patches[0].item()
