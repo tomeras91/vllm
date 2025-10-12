@@ -1,6 +1,36 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import socket
+
+def is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
+    """
+    Check if a TCP port is in use on the given host.
+
+    Args:
+        port (int): The port number to check.
+        host (str): The host to check (default: localhost).
+
+    Returns:
+        bool: True if the port is in use, False otherwise.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind((host, port))
+            return False  # bind succeeded, port is free
+        except OSError:
+            return True   # bind failed, port is in use
+
+# #==== START === Setup for attach-helper ====
+# import os
+# import sys
+# sys.path.insert(0, os.environ["ATTACH_HELPER_INSTALLATION_PATH"])
+# from attach_helper import debugging_setup
+# if not is_port_in_use(int(os.environ["ATTACH_HELPER_BASE_PORT"])):
+#     debugging_setup()
+# #==== END === Setup for attach-helper ====
+
+
 import asyncio
 import gc
 import hashlib

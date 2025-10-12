@@ -142,11 +142,17 @@ NanoNemotronVLVideoInputs = Union[
     NanoNemotronVLVideoPixelInputs, NanoNemotronVLVideoEmbeddingInputs
 ]
 
+def input_conditioner(x, norm_mean, norm_std):
+    # print("INPUT COND DTYPES", norm_mean.dtype, norm_std.dtype)
+    # print("INPUT COND VALUES", norm_mean, norm_std)
+    y = (x - norm_mean) / norm_std
+    return y
 
 def dynamic_preprocess(
     image, *, image_size=512, max_num_tiles=12, use_thumbnail=True, idx=0
 ):
     orig_width, orig_height = image.size
+    # print(f"max_num_tiles={max_num_tiles}")
 
     target_ratios = get_internvl_target_ratios(1, max_num_tiles)
 
@@ -320,17 +326,28 @@ class BaseNanoNemotronVLProcessor(ABC):
         else:
             pixel_values_lst = self._images_to_pixel_values_lst(images, max_num_tiles)
             image_inputs = {
-                "pixel_values_flat": torch.cat(pixel_values_lst),
+                "pixel_values_flat": input_conditioner(torch.cat(pixel_values_lst), self.norm_mean, self.norm_std),
                 "image_num_patches": torch.tensor(
                     [len(item) for item in pixel_values_lst]
                 ),
             }
 
-            for pixel_values in pixel_values_lst:
-                num_patches = pixel_values.shape[0]
-                feature_size = num_patches * self.num_image_token
-                image_repl = self.get_image_repl(feature_size, num_patches)
-                text = [t.replace("<image>", image_repl.full, 1) for t in text]
+            results_lst = []
+
+            for t in text:
+                parts = t.split('<image>')
+                assert len(parts) - 1 == len(pixel_values_lst), f"Number of <image> tokens ({len(parts) - 1}) doesn't match num_patches_list length ({len(pixel_values_lst)})"
+                
+                result = parts[0]
+                for pixel_values, part in zip(pixel_values_lst, parts[1:]):
+                    num_patches = pixel_values.shape[0]
+                    feature_size = num_patches * self.num_image_token
+                    image_repl = self.get_image_repl(feature_size, num_patches)
+                    result += image_repl.full + part
+                results_lst.append(result)
+            text = results_lst
+
+
         return text, image_inputs
 
     def _make_batch_input(self, input_item: Optional[Union[Any, list[Any]]] = None):
@@ -349,7 +366,7 @@ class BaseNanoNemotronVLProcessor(ABC):
     ) -> BatchFeature:
         # Use default if not provided
         if max_num_tiles is None:
-            max_num_tiles = 12
+            max_num_tiles = getattr(self, "max_num_tiles", None) or 12
 
         text, images = [self._make_batch_input(x) for x in (text, images)]
 
@@ -378,6 +395,7 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
         config: PretrainedConfig,
         tokenizer: AnyTokenizer,
         *,
+        max_num_tiles: Optional[int] = None,
         min_dynamic_patch: Optional[int] = None,
         max_dynamic_patch: Optional[int] = None,
         dynamic_image_size: Optional[bool] = None,
@@ -392,6 +410,7 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
         )
         # add extra video token for video processing
         self.video_token = video_token
+        self.max_num_tiles = max_num_tiles
 
     @property
     def supports_video(self) -> bool:
@@ -440,7 +459,7 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
             )
 
             video_inputs = {
-                "pixel_values_flat_video": torch.cat(pixel_values_lst_video),
+                "pixel_values_flat_video": input_conditioner(torch.cat(pixel_values_lst_video), self.norm_mean, self.norm_std),
                 "video_num_patches": torch.tensor(
                     [len(item) for item in pixel_values_lst_video]
                 ),
@@ -466,7 +485,7 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
     ) -> BatchFeature:
         # Use default if not provided
         if max_num_tiles is None:
-            max_num_tiles = 12
+            max_num_tiles = getattr(self, "max_num_tiles", None) or 12
 
         text, images, videos = [
             self._make_batch_input(x) for x in (text, images, videos)

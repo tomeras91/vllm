@@ -525,7 +525,11 @@ class RadioModel(nn.Module):
         pixel_values: Optional[torch.Tensor] = None,
         pixel_embeds: Optional[torch.Tensor] = None,
     ) -> torch.FloatTensor:
-        x = self.input_conditioner(pixel_values)
+        if False:
+            x = self.input_conditioner(pixel_values)
+        else:
+            # print("NO INPUT CONDITIONER")
+            x = pixel_values
         y = self.model(x)
         return self._extract_final(y)
 
