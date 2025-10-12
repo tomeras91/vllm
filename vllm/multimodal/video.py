@@ -195,6 +195,8 @@ class OpenCVDynamicVideoBackend(OpenCVVideoBackend):
         frame_indices: Union[range, list[int]]
         if duration <= max_duration:
             n = int(math.floor(duration * fps))
+            if num_frames > 0:
+                n = min(num_frames, n)
             frame_indices = sorted(
                 {
                     min(max_frame_idx, int(math.ceil(i * original_fps / fps)))
