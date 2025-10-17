@@ -110,11 +110,10 @@ class OpenCVVideoBackend(VideoLoader):
             or total_frames_num < max_num_frames_to_sample
         )
         if full_read:
-            num_frames = total_frames_num
-            frame_idx = list(range(0, num_frames))
+            frame_idx = list(range(0, total_frames_num))
         else:
             uniform_sampled_frames = np.linspace(
-                0, total_frames_num - 1, num_frames, dtype=int
+                0, total_frames_num - 1, max_num_frames_to_sample, dtype=int
             )
             frame_idx = uniform_sampled_frames.tolist()
         return frame_idx
@@ -122,7 +121,7 @@ class OpenCVVideoBackend(VideoLoader):
     @classmethod
     def _sample_frames_from_video(
         cls,
-        cap: "cv2.VideoCapture",
+        cap,
         frame_indices: list[int],
         allow_missing_frames: bool = False,
     ) -> npt.NDArray:
