@@ -273,9 +273,9 @@ class OpenCVDynamicVideoBackend(OpenCVVideoBackend):
 
         return frames, metadata
 
+
 @VIDEO_LOADER_REGISTRY.register("opencv_nemotron_vl_v2")
 class OpenCVNemotronVideoBackend(OpenCVVideoBackend):
-
     @classmethod
     def _get_frame_indices_to_sample(
         cls,
@@ -337,7 +337,9 @@ class OpenCVNemotronVideoBackend(OpenCVVideoBackend):
 
         duration = total_frames_num / original_fps
 
-        frame_indices = cls._get_frame_indices_to_sample(total_frames_num, num_frames, fps, duration)
+        frame_indices = cls._get_frame_indices_to_sample(
+            total_frames_num, num_frames, fps, duration
+        )
 
         effective_fps = len(frame_indices) / duration
         print(
@@ -347,7 +349,9 @@ class OpenCVNemotronVideoBackend(OpenCVVideoBackend):
             f"at {effective_fps:.2f}fps."
         )
 
-        frames = cls._sample_frames_from_video(cap, frame_indices, allow_missing_frames=True)
+        frames = cls._sample_frames_from_video(
+            cap, frame_indices, allow_missing_frames=True
+        )
 
         # Use transformers transformers.video_utils.VideoMetadata format
         metadata = {
@@ -360,6 +364,7 @@ class OpenCVNemotronVideoBackend(OpenCVVideoBackend):
         }
 
         return frames, metadata
+
 
 class VideoMediaIO(MediaIO[npt.NDArray]):
     def __init__(
