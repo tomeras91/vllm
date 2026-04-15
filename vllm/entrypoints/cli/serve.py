@@ -279,6 +279,8 @@ def run_multi_api_server(args: argparse.Namespace):
     with launch_core_engines(
         vllm_config, executor_class, log_stats, addresses, num_api_servers
     ) as (local_engine_manager, coordinator, addresses, tensor_queue):
+        held_input_sockets, held_output_sockets = addresses.pop_held_ports()
+
         # Construct common args for the APIServerProcessManager up-front.
         stats_update_address = None
         if coordinator:
@@ -294,6 +296,8 @@ def run_multi_api_server(args: argparse.Namespace):
             output_addresses=addresses.outputs,
             stats_update_address=stats_update_address,
             tensor_queue=tensor_queue,
+            held_input_sockets=held_input_sockets,
+            held_output_sockets=held_output_sockets,
         )
 
     # Wait for API servers.
