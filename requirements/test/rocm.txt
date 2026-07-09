@@ -233,6 +233,10 @@ fastapi-cloud-cli==0.16.1
     # via fastapi-cli
 fastar==0.10.0
     # via fastapi-cloud-cli
+fastokens==0.2.0
+    # via
+    #   -c requirements/common.txt
+    #   -r requirements/test/../common.txt
 fastparquet==2026.3.0
     # via genai-perf
 fastsafetensors==0.3.2
